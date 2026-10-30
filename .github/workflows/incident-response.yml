@@ -1,0 +1,139 @@
+name: Security Incident Response
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  detect-secrets:
+    name: Detect Hardcoded Credentials
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Scan tracked source files
+        id: scan
+        shell: bash
+        run: |
+          set +e
+
+          # Scan tracked application files only.
+          # Do not print matching lines or credential values.
+          findings=$(git grep -Il -E \
+            'DUMMY_API_KEY_[A-Za-z0-9]+|DemoPassword123!|postgres://[^[:space:]]+|admin_demo_[A-Za-z0-9]+' \
+            -- '*.go' '*.yaml' '*.yml' '*.json' '*.env' '*.properties' \
+            2>/dev/null)
+
+          scan_status=$?
+
+          if [ "$scan_status" -eq 0 ]; then
+            echo "status=incident" >> "$GITHUB_OUTPUT"
+            echo "files<<EOF" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "$findings" >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
+            echo "Potential hardcoded credentials detected."
+            echo "Affected files:"
+            printf '%s\n' "$findings"
+          elif [ "$scan_status" -eq 1 ]; then
+            echo "status=clean" >> "$GITHUB_OUTPUT"
+            echo "files=None" >> "$GITHUB_OUTPUT"
+            echo "No matching test patterns detected."
+          else
+            echo "The scan failed to execute correctly."
+            exit 2
+          fi
+
+      - name: Create incident issue
+        if: steps.scan.outputs.status == 'incident' && github.event_name != 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          AFFECTED_FILES: ${{ steps.scan.outputs.files }}
+        with:
+          script: |
+            const title = "[Security Incident] Potential hardcoded credentials detected";
+            const marker = "<!-- automated-secret-incident -->";
+
+            const { owner, repo } = context.repo;
+
+            const existing = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: "open",
+              per_page: 100
+            });
+
+            const duplicate = existing.data.find(issue =>
+              !issue.pull_request &&
+              issue.title === title &&
+              issue.body?.includes(marker)
+            );
+
+            if (duplicate) {
+              core.info(`Existing incident issue: #${duplicate.number}`);
+              return;
+            }
+
+            const files = process.env.AFFECTED_FILES || "Review workflow logs";
+
+            const body = [
+              marker,
+              "## Incident summary",
+              "GitHub Actions detected patterns matching the lab's simulated credential indicators.",
+              "",
+              "## Detection details",
+              `- Repository: ${owner}/${repo}`,
+              `- Commit: ${context.sha}`,
+              `- Workflow run: ${context.runId}`,
+              `- Event: ${context.eventName}`,
+              `- Potentially affected files:\n${files}`,
+              "",
+              "## Potential impact",
+              "Hardcoded credentials may be exposed to users with repository access.",
+              "The detected patterns are indicators, not proof that credentials are valid or were abused.",
+              "",
+              "## Required response",
+              "- [ ] Confirm the affected files and commits.",
+              "- [ ] Determine repository visibility and access during the exposure window.",
+              "- [ ] Verify whether any real credentials were exposed.",
+              "- [ ] Revoke and rotate any real exposed credentials.",
+              "- [ ] Remove hardcoded secrets and use secure configuration.",
+              "- [ ] Review relevant access and service logs.",
+              "- [ ] Rerun the security scan and verify recovery.",
+              "",
+              "## Lab safety",
+              "This repository uses fabricated test values. No real credential revocation is performed automatically.",
+              "",
+              "## Closure",
+              "Close this issue only after remediation and verification."
+            ].join("\n");
+
+            const issue = await github.rest.issues.create({
+              owner,
+              repo,
+              title,
+              body,
+              labels: ["security", "incident-response"]
+            });
+
+            core.info(`Created incident issue #${issue.data.number}`);
+
+      - name: Enforce security gate
+        if: steps.scan.outputs.status == 'incident'
+        run: |
+          echo "Security gate failed: hardcoded credential indicators detected."
+          exit 1
+
+      - name: Security check passed
+        if: steps.scan.outputs.status == 'clean'
+        run: |
+          echo "Security gate passed."
+          echo "No configured test patterns were detected."
