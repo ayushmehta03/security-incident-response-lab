@@ -4,15 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-)
-
-
-// hardcoded values 
-const (
-	apiKey  = "DUMMY_API_KEY_1234567890"
-	userID  = "admin_demo_001"
-	password = "DemoPassword123!"
-	databaseURL = "postgres://demo_user:demo_pass@localhost:5432/demo"
+	"os"
 )
 
 type HealthResponse struct {
@@ -27,6 +19,19 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+
+	//fixing the hard coded part 
+	
+	apiKey := os.Getenv("API_KEY")
+	databaseURL := os.Getenv("DATABASE_URL")
+
+	if apiKey == "" || databaseURL == "" {
+		log.Fatal("Required application configuration is missing")
+	}
+
+	_ = apiKey
+	_ = databaseURL
+
 	http.HandleFunc("/health", healthHandler)
 
 	log.Println("Demo API listening on :8080")
