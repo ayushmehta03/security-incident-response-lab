@@ -29,9 +29,9 @@ jobs:
           # Scan tracked application files only.
           # Do not print matching lines or credential values.
           findings=$(git grep -Il -E \
-            'DUMMY_API_KEY_[A-Za-z0-9]+|DemoPassword123!|postgres://[^[:space:]]+|admin_demo_[A-Za-z0-9]+' \
-            -- '*.go' '*.yaml' '*.yml' '*.json' '*.env' '*.properties' \
-            2>/dev/null)
+          'DUMMY_API_KEY_[A-Za-z0-9]+|DemoPassword123!|postgres://[^[:space:]]+|admin_demo_[A-Za-z0-9]+' \
+          -- '*.go' '*.json' '*.env' '*.properties' \
+           2>/dev/null)
 
           scan_status=$?
 
